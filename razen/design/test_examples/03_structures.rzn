@@ -1,0 +1,309 @@
+// ─────────────────────────────────────────────────────────────
+// 03_structures.rzn
+// Covers: Structs, Enums, Tuples, Alias
+// ─────────────────────────────────────────────────────────────
+
+
+// ══════════════════════════════════════════════════════════════
+// 2. STRUCTS
+// ══════════════════════════════════════════════════════════════
+
+struct Point {
+    x: float,
+    y: float,
+}
+
+struct User {
+    id:        int,
+    name:      str,
+    email:     str,
+    is_active: bool,
+}
+
+struct Rectangle {
+    origin: Point,
+    width:  float,
+    height: float,
+}
+
+struct Product {
+    id:       int,
+    title:    str,
+    price:    float,
+    in_stock: bool,
+}
+
+// Create — immutable
+origin   := Point { x: 0.0, y: 0.0 }
+my_point := Point { x: 10.5, y: 20.3 }
+
+alice := User {
+    id:        1,
+    name:      "Alice",
+    email:     "alice@razen.dev",
+    is_active: true,
+}
+
+rect := Rectangle {
+    origin: Point { x: 5.0, y: 10.0 },
+    width:  200.0,
+    height: 150.0,
+}
+
+// Create — mutable
+mut bob = User {
+    id:        2,
+    name:      "Bob",
+    email:     "bob@razen.dev",
+    is_active: true,
+}
+
+// Mutate fields
+bob.name      = "Robert"
+bob.is_active = false
+
+// Access
+user_name  := alice.name        // "Alice"
+user_email := alice.email       // "alice@razen.dev"
+rect_width := rect.width        // 200.0
+origin_x   := rect.origin.x    // 5.0
+
+// Methods via impl
+impl User {
+    act greet(self) str {
+        "Hello, I am {self.name}!"
+    }
+
+    act deactivate(mut self) void {
+        self.is_active = false
+    }
+
+    act is_valid(self) bool {
+        self.name != "" && self.email.contains("@")
+    }
+}
+
+impl Point {
+    act distance_from_origin(self) float {
+        (self.x * self.x + self.y * self.y) ** 0.5
+    }
+}
+
+impl Rectangle {
+    act area(self) float {
+        self.width * self.height
+    }
+
+    act perimeter(self) float {
+        2.0 * (self.width + self.height)
+    }
+}
+
+// Use methods
+msg   := alice.greet()               // "Hello, I am Alice!"
+valid := alice.is_valid()            // true
+dist  := my_point.distance_from_origin()
+area  := rect.area()                 // 30000.0
+
+
+// ══════════════════════════════════════════════════════════════
+// 3. ENUMS
+// ══════════════════════════════════════════════════════════════
+
+// Simple enum
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+enum Status {
+    Active,
+    Inactive,
+    Pending,
+}
+
+enum LogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error,
+}
+
+// Enum with associated data (tagged union)
+enum Shape {
+    Circle(float),
+    Rectangle(float, float),
+    Triangle(float, float, float),
+}
+
+enum NetworkError {
+    Timeout(int),
+    NotFound(str),
+    Unauthorized,
+    ServerError(int, str),
+}
+
+// Use simple enum
+my_dir    := Direction.North
+my_status := Status.Active
+my_level  := LogLevel.Info
+
+// Match simple enum
+match my_dir {
+    Direction.North -> println("Going north"),
+    Direction.South -> println("Going south"),
+    Direction.East  -> println("Going east"),
+    Direction.West  -> println("Going west"),
+}
+
+// Match with associated data
+my_shape := Shape.Circle(5.0)
+
+area := match my_shape {
+    Shape.Circle(r)          -> 3.14159 * r * r,
+    Shape.Rectangle(w, h)    -> w * h,
+    Shape.Triangle(a, b, c)  -> {
+        s := (a + b + c) / 2.0
+        (s * (s-a) * (s-b) * (s-c)) ** 0.5
+    },
+}
+
+// Enum in function
+act describe_error(err: NetworkError) str {
+    match err {
+        NetworkError.Timeout(ms)           -> "Timed out after {ms}ms",
+        NetworkError.NotFound(url)         -> "Not found: {url}",
+        NetworkError.Unauthorized          -> "Access denied",
+        NetworkError.ServerError(code, m)  -> "Server {code}: {m}",
+    }
+}
+
+net_err  := NetworkError.Timeout(5000)
+err_desc := describe_error(net_err)    // "Timed out after 5000ms"
+
+// Enum methods
+impl Status {
+    act label(self) str {
+        match self {
+            Status.Active   -> "✅ Active",
+            Status.Inactive -> "❌ Inactive",
+            Status.Pending  -> "⏳ Pending",
+        }
+    }
+
+    act is_active(self) bool {
+        self == Status.Active
+    }
+}
+
+label := Status.Pending.label()        // "⏳ Pending"
+
+
+// ══════════════════════════════════════════════════════════════
+// 9. TUPLES
+// ══════════════════════════════════════════════════════════════
+
+// Create
+point  := (10, 20)
+person := ("Alice", 25, true)
+rgb    := (255, 128, 0)
+coords := (1.5, 2.3, 4.7)
+
+// Access by index
+x := point.0    // 10
+y := point.1    // 20
+
+p_name   := person.0   // "Alice"
+p_age    := person.1   // 25
+p_active := person.2   // true
+
+// Destructure
+(x, y)                   := point
+(user_name, age, active) := person
+(r, g, b)                := rgb
+
+// Return multiple values
+act div_mod(a: int, b: int) (int, int) {
+    (a / b, a % b)
+}
+
+act min_max(arr: vec[int]) (int, int) {
+    mut lo: int = arr[0]
+    mut hi: int = arr[0]
+    loop val in arr {
+        if val < lo { lo = val }
+        if val > hi { hi = val }
+    }
+    (lo, hi)
+}
+
+(quotient, remainder) := div_mod(17, 5)              // 3, 2
+(lo, hi)              := min_max(vec[3, 1, 4, 1, 5, 9, 2])  // 1, 9
+
+// Tuple in struct field
+struct ApiResponse {
+    data:   str,
+    status: (int, str),
+}
+
+response := ApiResponse {
+    data:   "Success",
+    status: (200, "OK"),
+}
+
+code := response.status.0   // 200
+msg  := response.status.1   // "OK"
+
+// Tuple in vec
+mut pairs: vec[(str, int)] = vec[("Alice", 95), ("Bob", 87), ("Charlie", 92)]
+
+loop (name, score) in pairs {
+    println("{name}: {score}")
+}
+
+// Nested tuple
+nested     := ((1, 2), (3, 4))
+first_pair := nested.0      // (1, 2)
+inner_val  := nested.0.1    // 2
+
+
+// ══════════════════════════════════════════════════════════════
+// 19. ALIAS
+// ══════════════════════════════════════════════════════════════
+
+alias UserId   = int
+alias Score    = float
+alias NameMap  = map[str, str]
+alias IdSet    = set[int]
+alias Vector3  = [float; 3]
+alias Matrix4  = [[float; 4]; 4]
+
+// Using aliases
+user_id:      UserId  := 42
+avg_score:    Score   := 91.5
+meta:         NameMap := map[]
+allowed:      IdSet   := set[1, 2, 3, 4, 5]
+position:     Vector3 := [0.0, 1.0, 0.0]
+
+// Mutable alias
+mut current_score: Score = 0.0
+current_score = 87.5
+
+// Alias with generics
+alias ApiResult[T] = result[T, str]
+alias MaybeUser    = option[User]
+
+act get_score(id: int) ApiResult[Score] {
+    if id < 0 { ret err("Invalid id") }
+    ok(95.5)
+}
+
+act find_user(id: int) MaybeUser {
+    if id == 1 { ret some(alice) }
+    none
+}
+
+score_res := get_score(1)    // ok(95.5)
+user_res  := find_user(1)    // some(User{...})

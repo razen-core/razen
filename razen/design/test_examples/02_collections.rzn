@@ -1,0 +1,243 @@
+// ─────────────────────────────────────────────────────────────
+// 02_collections.rzn
+// Covers: Arrays, Vectors, Maps, Sets, Slices
+// Rules:
+//   [] = all collection type parameters and literals
+//   vec[T]      — dynamic array
+//   map[K, V]   — key-value map  (literal: map["key": value])
+//   set[T]      — unique values
+//   [T; N]      — fixed-size array
+// ─────────────────────────────────────────────────────────────
+
+
+// ══════════════════════════════════════════════════════════════
+// 4. ARRAYS — Fixed Size
+// ══════════════════════════════════════════════════════════════
+
+// Explicit type (empty)
+nums:   [int; 5]   := [0, 0, 0, 0, 0]
+flags:  [bool; 3]  := [false, false, false]
+prices: [float; 4] := [0.0, 0.0, 0.0, 0.0]
+
+// Mutable explicit
+mut scores: [int; 5] = [0, 0, 0, 0, 0]
+scores[0] = 95
+scores[1] = 87
+
+// With values (inferred)
+values  := [10, 20, 30, 40, 50]
+letters := ["a", "b", "c", "d"]
+
+// Multi-dimensional
+matrix := [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+]
+
+// Access
+first := values[0]               // 10
+last  := values[values.len()-1]  // 50
+cell  := matrix[1][2]            // 6
+
+// Slicing
+chunk  := values[1..4]           // [20, 30, 40]
+incl   := values[1..=4]          // [20, 30, 40, 50]
+prefix := values[..3]            // [10, 20, 30]
+suffix := values[3..]            // [40, 50]
+
+// Iteration
+loop item in values {
+    println(item)
+}
+
+loop (i, val) in values.enumerate() {
+    println("{i}: {val}")
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 5. VECTORS — Dynamic Size
+// ══════════════════════════════════════════════════════════════
+
+// Explicit type (empty)
+mut nums:   vec[int]  = vec[]
+mut names:  vec[str]  = vec[]
+mut flags:  vec[bool] = vec[]
+
+// With values (inferred)
+values := vec[1, 2, 3, 4, 5]
+words  := vec["Razen", "Rust", "Go"]
+
+// Mutable with values
+mut scores: vec[int] = vec[90, 85, 78, 92]
+
+// Mutate
+nums.push(10)
+nums.push(20)
+nums.push(30)
+
+popped := nums.pop()              // some(30)
+nums.insert(1, 15)                // [10, 15, 20]
+nums.remove(0)                    // [15, 20]
+nums.clear()                      // []
+
+// Helpers
+len      := scores.len()          // 4
+is_empty := nums.is_empty()       // true
+first    := scores[0]             // 90
+
+// Pre-allocate
+mut buffer: vec[int] = vec[].with_capacity(1000)
+
+// Nested vec
+mut grid: vec[vec[int]] = vec[vec[1, 2, 3], vec[4, 5, 6]]
+inner_val := grid[0][2]           // 3
+
+// Iteration
+loop val in scores {
+    println(val)
+}
+
+loop (i, val) in words.enumerate() {
+    println("{i}: {val}")
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 6. MAPS — Key-Value Storage
+// ══════════════════════════════════════════════════════════════
+
+// Explicit type (empty)
+mut ages:     map[str, int]  = map[]
+mut cache:    map[int, str]  = map[]
+mut settings: map[str, bool] = map[]
+
+// With values (inferred) — key: value inside []
+ages     := map["Alice": 25, "Bob": 30, "Charlie": 28]
+capitals := map["USA": "Washington", "India": "Delhi"]
+
+// Mutable with values
+mut points: map[str, int] = map["Alice": 95, "Bob": 87, "Charlie": 92]
+
+// Insert & update
+points.insert("Alice", 100)
+points.insert("Bob", 85)
+points.insert("Alice", 98)       // replaces 100
+
+// Remove
+points.remove("Bob")
+
+// Access
+alice_score := points.get("Alice")              // some(98)
+unknown     := points.get("Dave")               // none
+safe_score  := points.get("Alice").unwrap_or(0) // 98
+
+// Check
+has_alice := points.contains("Alice")           // true
+total     := points.len()
+
+// Iteration
+loop (key, val) in points {
+    println("{key}: {val}")
+}
+
+loop key in points.keys() {
+    println(key)
+}
+
+loop val in points.values() {
+    println(val)
+}
+
+// Nested map
+mut tag_map: map[str, vec[str]] = map[]
+tag_map.insert("tech",  vec["rust", "razen", "go"])
+tag_map.insert("sport", vec["football", "tennis"])
+
+
+// ══════════════════════════════════════════════════════════════
+// 7. SETS — Unique Values
+// ══════════════════════════════════════════════════════════════
+
+// Explicit type (empty)
+mut tags:       set[str] = set[]
+mut active_ids: set[int] = set[]
+
+// With values (inferred)
+tags   := set["rust", "razen", "go", "python"]
+primes := set[2, 3, 5, 7, 11]
+
+// Mutable with values
+mut roles: set[str] = set["admin", "member", "moderator"]
+
+// Insert (duplicates ignored)
+tags.insert("Razen")
+tags.insert("Rust")
+tags.insert("Razen")             // ignored
+
+// Remove
+tags.remove("Rust")
+
+// Check
+has_razen := tags.contains("Razen")  // true
+has_java  := tags.contains("Java")   // false
+count     := tags.len()
+
+// Set operations
+a := set[1, 2, 3, 4]
+b := set[3, 4, 5, 6]
+
+union_ab := a.union(b)           // {1,2,3,4,5,6}
+inter_ab := a.intersection(b)    // {3,4}
+diff_ab  := a.difference(b)      // {1,2}
+
+// Iteration
+loop item in tags {
+    println(item)
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 8. SLICES — Views into Arrays / Vecs
+// ══════════════════════════════════════════════════════════════
+
+arr := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+// Slice types
+first5  := arr[0..5]     // [1,2,3,4,5]    exclusive
+incl    := arr[2..=5]    // [3,4,5,6]       inclusive
+prefix  := arr[..4]      // [1,2,3,4]
+suffix  := arr[7..]      // [8,9,10]
+full    := arr[..]       // entire array
+
+// From vec
+nums    := vec[10, 20, 30, 40, 50]
+portion := nums[1..4]    // [20,30,40]
+
+// Slice length & access
+slice_len   := portion.len()   // 3
+slice_first := portion[0]      // 20
+
+// Iteration over slice
+loop item in portion {
+    println(item)
+}
+
+// Slice as function parameter
+act sum_slice(data: [int]) int {
+    data.reduce(0, |acc, x| acc + x)
+}
+
+result := sum_slice(arr[0..5])  // 15
+
+act find_max(data: [int]) option[int] {
+    if data.is_empty() { ret none }
+    mut max: int = data[0]
+    loop val in data {
+        if val > max { max = val }
+    }
+    some(max)
+}
+
+max_val := find_max(arr[3..8])  // some(8)

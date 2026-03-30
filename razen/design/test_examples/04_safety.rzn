@@ -1,0 +1,360 @@
+// ─────────────────────────────────────────────────────────────
+// 04_safety.rzn
+// Covers: Option, Result, Closures, Traits, Generics, Shared
+// ─────────────────────────────────────────────────────────────
+
+
+// ══════════════════════════════════════════════════════════════
+// SETUP — types used across this file
+// ══════════════════════════════════════════════════════════════
+
+struct User {
+    id:        int,
+    name:      str,
+    email:     str,
+    is_active: bool,
+}
+
+struct Config {
+    host: str,
+    port: int,
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 9. OPTION — Nullable / Optional Values
+// ══════════════════════════════════════════════════════════════
+
+act find_user(id: int) option[User] {
+    if id < 0 { ret none }
+    if id == 1 {
+        ret some(User {
+            id:        1,
+            name:      "Alice",
+            email:     "alice@razen.dev",
+            is_active: true,
+        })
+    }
+    none
+}
+
+act find_score(name: str, scores: map[str, int]) option[int] {
+    scores.get(name)
+}
+
+// Match
+result  := find_user(1)
+missing := find_user(99)
+
+match result {
+    some(user) -> println("Found: {user.name}"),
+    none       -> println("Not found"),
+}
+
+// Unwrap helpers
+user_val  := result.unwrap()
+safe_user := result.unwrap_or(User { id: 0, name: "guest", email: "", is_active: false })
+is_found  := result.is_some()
+is_empty  := missing.is_none()
+
+// Map / transform
+upper_name := some("alice").map(|s| s.to_upper_case())    // some("ALICE")
+email_opt  := find_user(1).map(|u| u.email)               // some("alice@razen.dev")
+
+// Option in vec — filter out nones
+mut maybe_scores: vec[option[int]] = vec[some(90), none, some(75), none, some(88)]
+
+loop item in maybe_scores {
+    if let some(score) = item {
+        println("Score: {score}")
+    }
+}
+
+// Chaining
+act get_email(id: int) option[str] {
+    find_user(id).map(|u| u.email)
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 10. RESULT — Error Handling
+// ══════════════════════════════════════════════════════════════
+
+act parse_age(input: str) result[int, str] {
+    age := input.parse_int()?
+    if age < 0   { ret err("Age cannot be negative") }
+    if age > 150 { ret err("Age too high") }
+    ok(age)
+}
+
+act create_user(name: str, age_str: str) result[User, str] {
+    if name == "" { ret err("Name is empty") }
+    age := parse_age(age_str)?    // ? propagates err
+    ok(User {
+        id:        0,
+        name:      name,
+        email:     "{name}@razen.dev",
+        is_active: age >= 18,
+    })
+}
+
+// Match result
+good_res := parse_age("25")   // ok(25)
+bad_res  := parse_age("-5")   // err("Age cannot be negative")
+
+match good_res {
+    ok(age)  -> println("Valid age: {age}"),
+    err(msg) -> println("Error: {msg}"),
+}
+
+// Unwrap helpers
+age_val  := good_res.unwrap()
+safe_age := bad_res.unwrap_or(0)
+is_ok    := good_res.is_ok()
+is_err   := bad_res.is_err()
+
+// Error unwrap
+if bad_res.is_err() {
+    e := bad_res.unwrap_err()
+    println("Got: {e}")
+}
+
+// Map transform
+doubled := ok(10)
+    .map(|x| x * 2)                   // ok(20)
+    .map_err(|e| "Wrapped: {e}")
+
+// Chained ? propagation
+act register(name: str, age_str: str) result[str, str] {
+    user := create_user(name, age_str)?
+    ok("Registered: {user.name}")
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 15. CLOSURES — Function Values
+// ══════════════════════════════════════════════════════════════
+
+// Typed closure parameters use name: Type
+double := |x: int| x * 2
+add    := |a: int, b: int| a + b
+greet  := |name: str| "Hello, {name}!"
+
+val_d := double(5)    // 10
+val_a := add(3, 4)    // 7
+val_g := greet("Bob") // "Hello, Bob!"
+
+// Multi-line closure
+clamp := |x: int| {
+    if x < 0   { ret 0 }
+    if x > 100 { ret 100 }
+    x
+}
+
+clamped := clamp(150)   // 100
+
+// Inferred parameters — no annotation needed inline
+nums := vec[1, 2, 3, 4, 5, 6]
+
+doubled  := nums.map(|x| x * 2)              // [2,4,6,8,10,12]
+evens    := nums.filter(|x| x % 2 == 0)      // [2,4,6]
+total    := nums.reduce(0, |acc, x| acc + x)  // 21
+has_big  := nums.any(|x| x > 4)              // true
+all_pos  := nums.all(|x| x > 0)              // true
+
+// Capture outer variable
+factor := 3
+triple := |x: int| x * factor
+result := triple(7)                           // 21
+
+// Closure as parameter — use |Type| -> ReturnType syntax
+act apply(value: int, f: |int| -> int) int {
+    f(value)
+}
+
+squared := apply(5, |x| x * x)    // 25
+
+// Closure returning closure (factory)
+act make_adder(n: int) |int| -> int {
+    |x| x + n
+}
+
+add5     := make_adder(5)
+add5_res := add5(10)               // 15
+
+
+// ══════════════════════════════════════════════════════════════
+// 16. GENERICS — Type Parameters
+// ══════════════════════════════════════════════════════════════
+
+// Generic functions
+act first[T](arr: vec[T]) option[T] {
+    if arr.is_empty() { ret none }
+    some(arr[0])
+}
+
+act last[T](arr: vec[T]) option[T] {
+    if arr.is_empty() { ret none }
+    some(arr[arr.len() - 1])
+}
+
+act contains[T](arr: vec[T], target: T) bool {
+    loop item in arr {
+        if item == target { ret true }
+    }
+    false
+}
+
+// Call — type inferred
+int_first := first(vec[10, 20, 30])        // some(10)
+str_last  := last(vec["a", "b", "c"])      // some("c")
+has_three := contains(vec[1, 2, 3], 3)     // true
+
+// Generic struct
+struct Box[T] {
+    value: T,
+    label: str,
+}
+
+struct Pair[A, B] {
+    first:  A,
+    second: B,
+}
+
+// Create
+int_box  := Box[int] { value: 42,      label: "number" }
+str_box  := Box[str] { value: "hello", label: "text" }
+name_age := Pair[str, int] { first: "Alice", second: 25 }
+
+// Generic impl
+impl Box[T] {
+    act unwrap(self) T {
+        self.value
+    }
+
+    act map[U](self, f: |T| -> U) Box[U] {
+        Box[U] { value: f(self.value), label: self.label }
+    }
+}
+
+raw_val := int_box.unwrap()              // 42
+dbl_box := int_box.map(|x| x * 2)       // Box{ value: 84 }
+str_val := str_box.map(|s| s.len())      // Box{ value: 5 }
+
+
+// ══════════════════════════════════════════════════════════════
+// 17. TRAITS — Shared Behaviour / Interfaces
+// ══════════════════════════════════════════════════════════════
+
+trait Describable {
+    act describe(self) str
+}
+
+trait Shape {
+    act area(self) float
+    act perimeter(self) float
+}
+
+trait Resizable {
+    act scale(mut self, factor: float) void
+}
+
+struct Circle {
+    radius: float,
+}
+
+struct Square {
+    side: float,
+}
+
+impl Shape for Circle {
+    act area(self) float {
+        3.14159 * self.radius * self.radius
+    }
+
+    act perimeter(self) float {
+        2.0 * 3.14159 * self.radius
+    }
+}
+
+impl Shape for Square {
+    act area(self) float      { self.side * self.side }
+    act perimeter(self) float { 4.0 * self.side }
+}
+
+impl Describable for Circle {
+    act describe(self) str {
+        "Circle with radius {self.radius}"
+    }
+}
+
+impl Describable for Square {
+    act describe(self) str {
+        "Square with side {self.side}"
+    }
+}
+
+impl Resizable for Circle {
+    act scale(mut self, factor: float) void {
+        self.radius = self.radius * factor
+    }
+}
+
+// Use
+c := Circle { radius: 5.0 }
+s := Square { side: 4.0 }
+
+c_area := c.area()          // 78.53
+s_area := s.area()          // 16.0
+c_desc := c.describe()      // "Circle with radius 5.0"
+
+// Trait as parameter type
+act print_info(shape: Describable) void {
+    println(shape.describe())
+}
+
+// Generic with trait bound
+act total_area[T: Shape](shapes: vec[T]) float {
+    shapes.reduce(0.0, |acc, s| acc + s.area())
+}
+
+// Multiple trait bounds
+act print_and_scale[T: Shape + Describable + Resizable](
+    shape: mut T,
+    factor: float,
+) void {
+    println(shape.describe())
+    shape.scale(factor)
+    println("New area: {shape.area()}")
+}
+
+print_info(c)
+print_info(s)
+
+
+// ══════════════════════════════════════════════════════════════
+// 18. SHARED — Reference Counting
+// ══════════════════════════════════════════════════════════════
+
+// Shared ownership
+shared config = Config { host: "localhost", port: 8080 }
+
+// Shared collection
+shared cache: map[str, str] = map[]
+cache.insert("key1", "value1")
+cache.insert("key2", "value2")
+
+// Shared in struct
+struct Node[T] {
+    value: T,
+    next:  option[shared Node[T]],
+}
+
+// Build linked nodes
+node_c := shared Node[int] { value: 3, next: none }
+node_b := shared Node[int] { value: 2, next: some(node_c) }
+node_a := shared Node[int] { value: 1, next: some(node_b) }
+
+// Access
+head_val  := node_a.value    // 1
+next_node := node_a.next     // some(Node{ value: 2, ... })

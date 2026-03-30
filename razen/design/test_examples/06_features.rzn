@@ -1,0 +1,1052 @@
+// ─────────────────────────────────────────────────────────────
+// 06_features.rzn
+// Covers all 20 new language features:
+//   1.  Compound assignment operators
+//   2.  Wildcard _ and exhaustive match
+//   3.  char type
+//   4.  Operator overloading (Add, Eq, Ord, Display)
+//   5.  Match guards
+//   6.  fork structured concurrency
+//   7.  Struct update syntax (..)
+//   8.  Named enum field variants
+//   9.  where clause
+//  10.  Sized integer and float types (i8–i64, u8–u64, f32)
+//  11.  never type
+//  12.  Labeled loops
+//  13.  Attributes (@)
+//  14.  as type casting
+//  15.  loop as expression
+//  16.  Iterator trait
+//  17.  pub visibility levels
+//  18.  Default trait implementations
+//  19.  not operator
+//  20.  String escape sequences
+// ─────────────────────────────────────────────────────────────
+
+
+// ══════════════════════════════════════════════════════════════
+// 1. COMPOUND ASSIGNMENT OPERATORS
+// ══════════════════════════════════════════════════════════════
+
+mut score:  int   = 0
+mut ratio:  float = 1.0
+mut label:  str   = "score"
+mut pixel:  u8    = 100u8
+mut weight: f32   = 0.5f32
+
+score  += 50      // 50
+score  -= 10      // 40
+score  *= 2       // 80
+score  /= 4       // 20
+score  %= 7       // 6
+score  **= 2      // 36
+
+ratio  += 0.5     // 1.5
+ratio  *= 2.0     // 3.0
+
+label  += ": {score}"    // "score: 36"
+
+pixel  += 50u8    // 150
+weight *= 2.0f32  // 1.0
+
+
+// ══════════════════════════════════════════════════════════════
+// 2. WILDCARD _ AND EXHAUSTIVE MATCH
+// ══════════════════════════════════════════════════════════════
+
+enum Color { Red, Green, Blue, Yellow }
+
+// _ catch-all — satisfies exhaustiveness
+act color_label(c: Color) str {
+    match c {
+        Color.Red    -> "red",
+        Color.Green  -> "green",
+        _            -> "other",    // catches Blue, Yellow, future variants
+    }
+}
+
+// All-explicit — compiler verifies every variant is covered
+act color_hex(c: Color) str {
+    match c {
+        Color.Red    -> "#FF0000",
+        Color.Green  -> "#00FF00",
+        Color.Blue   -> "#0000FF",
+        Color.Yellow -> "#FFFF00",
+    }
+}
+
+// _ in destructuring
+(first, _, third) := (1, 99, 3)    // ignore middle
+(_, y)            := (10, 20)       // ignore x
+
+// _ to suppress unused warning
+_ := expensive_computation()
+
+// _ in function parameter
+act fire_and_forget(_: Event) void {
+    println("event received")
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 3. CHAR TYPE
+// ══════════════════════════════════════════════════════════════
+
+letter:  char := 'a'
+digit:   char := '9'
+emoji:   char := '😀'
+newline: char := '\n'
+unicode: char := '\u{1F600}'
+
+// char operations
+is_alpha   := letter.is_alphabetic()    // true
+is_digit   := digit.is_numeric()        // true
+upper_c    := letter.to_uppercase()     // 'A'
+lower_c    := 'Z'.to_lowercase()        // 'z'
+codepoint  := letter.to_u32()           // 97
+as_str     := letter.to_string()        // "a"
+
+// char from codepoint
+maybe_char := char.from_u32(65u32)      // some('A')
+
+// char ranges in loop
+loop c in 'a'..='z' {
+    print(c)
+}
+
+// char in match
+act classify_char(c: char) str {
+    match c {
+        'a'..='z' -> "lowercase",
+        'A'..='Z' -> "uppercase",
+        '0'..='9' -> "digit",
+        ' ' | '\t' | '\n' -> "whitespace",
+        _          -> "other",
+    }
+}
+
+// String iteration yields chars
+word := "Razen"
+loop c in word.chars() {
+    print("{c} ")    // R a z e n
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 4. OPERATOR OVERLOADING
+// ══════════════════════════════════════════════════════════════
+
+@derive[Debug, Clone]
+struct Vec2 {
+    x: float,
+    y: float,
+}
+
+impl Add[Vec2, Vec2] for Vec2 {
+    act add(self, other: Vec2) Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+impl Sub[Vec2, Vec2] for Vec2 {
+    act sub(self, other: Vec2) Vec2 {
+        Vec2 { x: self.x - other.x, y: self.y - other.y }
+    }
+}
+
+impl Mul[float, Vec2] for Vec2 {
+    act mul(self, scalar: float) Vec2 {
+        Vec2 { x: self.x * scalar, y: self.y * scalar }
+    }
+}
+
+impl Neg for Vec2 {
+    act neg(self) Vec2 {
+        Vec2 { x: -self.x, y: -self.y }
+    }
+}
+
+impl Eq for Vec2 {
+    act eq(self, other: Vec2) bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl Ord for Vec2 {
+    act cmp(self, other: Vec2) Ordering {
+        len_a := self.x * self.x + self.y * self.y
+        len_b := other.x * other.x + other.y * other.y
+        if len_a < len_b { Ordering.Less }
+        else if len_a > len_b { Ordering.Greater }
+        else { Ordering.Equal }
+    }
+}
+
+impl Display for Vec2 {
+    act to_string(self) str {
+        "({self.x}, {self.y})"
+    }
+}
+
+a := Vec2 { x: 1.0, y: 2.0 }
+b := Vec2 { x: 3.0, y: 4.0 }
+
+c := a + b            // Vec2 { x: 4.0, y: 6.0 }
+d := b - a            // Vec2 { x: 2.0, y: 2.0 }
+e := a * 3.0          // Vec2 { x: 3.0, y: 6.0 }
+f := -a               // Vec2 { x: -1.0, y: -2.0 }
+
+if a == b { println("equal") } else { println("not equal") }
+println(a.to_string())    // "(1, 2)"
+
+// Sorting uses Ord
+vecs := vec[
+    Vec2 { x: 3.0, y: 4.0 },    // length 5
+    Vec2 { x: 1.0, y: 0.0 },    // length 1
+    Vec2 { x: 2.0, y: 2.0 },    // length ~2.8
+]
+sorted := vecs.sort()    // sorted by length
+
+
+// ══════════════════════════════════════════════════════════════
+// 5. MATCH GUARDS
+// ══════════════════════════════════════════════════════════════
+
+act grade(score: int) str {
+    match score {
+        n if n >= 90 -> "A",
+        n if n >= 80 -> "B",
+        n if n >= 70 -> "C",
+        n if n >= 60 -> "D",
+        _            -> "F",
+    }
+}
+
+// Guard on enum
+enum Shape {
+    Circle(float),
+    Rectangle(float, float),
+}
+
+act describe_shape(s: Shape) str {
+    match s {
+        Shape.Circle(r) if r > 100.0 -> "large circle",
+        Shape.Circle(r) if r > 10.0  -> "medium circle",
+        Shape.Circle(r)               -> "small circle r={r}",
+        Shape.Rectangle(w, h) if w == h -> "square {w}x{h}",
+        Shape.Rectangle(w, h)           -> "rect {w}x{h}",
+    }
+}
+
+// Guard on option
+act describe_user(user: option[User]) str {
+    match user {
+        some(u) if u.is_active && u.score > 90.0 -> "top user: {u.name}",
+        some(u) if u.is_active                   -> "active: {u.name}",
+        some(u)                                   -> "inactive: {u.name}",
+        none                                      -> "no user",
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 6. FORK — STRUCTURED CONCURRENCY
+// ══════════════════════════════════════════════════════════════
+
+async act fetch_user(id: int) result[User, str] {
+    data := http.get("https://api.razen.dev/users/{id}").await?
+    parse_json[User](data)
+}
+
+async act fetch_posts(user_id: int) result[vec[Post], str] {
+    data := http.get("https://api.razen.dev/posts?user={user_id}").await?
+    parse_json[vec[Post]](data)
+}
+
+// Fork two tasks concurrently — both run at the same time
+async act load_dashboard(user_id: int) result[str, str] {
+    (user_res, posts_res) := fork {
+        fetch_user(user_id).await,
+        fetch_posts(user_id).await,
+    }
+
+    user  := user_res?
+    posts := posts_res?
+    ok("Dashboard: {user.name} — {posts.len()} posts")
+}
+
+// Fork with named results
+async act load_all(user_id: int) void {
+    fork {
+        user_data  <- fetch_user(user_id).await,
+        posts_data <- fetch_posts(user_id).await,
+    }
+    println("User: {user_data}")
+    println("Posts: {posts_data}")
+}
+
+// Fork over a collection
+async act load_many(ids: vec[int]) vec[result[User, str]] {
+    fork loop id in ids {
+        fetch_user(id).await
+    }
+}
+
+// Shared state is automatically atomic across fork
+shared visit_count: map[str, int] = map[]
+
+async act track_visit(path: str) void {
+    fork {
+        increment_count(visit_count, path).await,
+        log_visit(path).await,
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 7. STRUCT UPDATE SYNTAX — ..
+// ══════════════════════════════════════════════════════════════
+
+struct User {
+    id:        int,
+    name:      str,
+    email:     str,
+    is_active: bool,
+    score:     float,
+}
+
+alice := User {
+    id:        1,
+    name:      "Alice",
+    email:     "alice@razen.dev",
+    is_active: true,
+    score:     91.5,
+}
+
+// Copy with overrides — unchanged fields come from alice
+renamed     := User { name: "Alicia",          ..alice }
+deactivated := User { is_active: false,         ..alice }
+promoted    := User { score: alice.score + 5.0, ..alice }
+updated     := User { name: "Alicia", score: 95.0, ..alice }
+
+// Useful for default configs
+struct Config {
+    host:     str,
+    port:     int,
+    timeout:  int,
+    retries:  int,
+    debug:    bool,
+}
+
+default_cfg := Config {
+    host:    "localhost",
+    port:    8080,
+    timeout: 30,
+    retries: 3,
+    debug:   false,
+}
+
+prod_cfg := Config { host: "0.0.0.0", debug: false, ..default_cfg }
+dev_cfg  := Config { debug: true, timeout: 120,     ..default_cfg }
+test_cfg := Config { port: 9999, retries: 1,        ..default_cfg }
+
+
+// ══════════════════════════════════════════════════════════════
+// 8. NAMED ENUM FIELD VARIANTS
+// ══════════════════════════════════════════════════════════════
+
+enum Event {
+    Click    { x: float, y: float },
+    Resize   { width: int, height: int },
+    KeyPress { key: char, shift: bool, ctrl: bool },
+    Scroll   { delta: float, horizontal: bool },
+    Quit,
+}
+
+enum ApiError {
+    NotFound,
+    Timeout(int),                           // positional
+    ParseError { line: int, msg: str },     // named
+    Auth { code: int, reason: str },        // named
+}
+
+// Create named variants
+click_ev  := Event.Click { x: 100.0, y: 200.0 }
+resize_ev := Event.Resize { width: 1920, height: 1080 }
+key_ev    := Event.KeyPress { key: 'a', shift: false, ctrl: true }
+
+// Match named variants — bind by field name
+act handle_event(ev: Event) void {
+    match ev {
+        Event.Click { x, y }                          -> println("click at ({x},{y})"),
+        Event.Resize { width, height }                -> println("resize to {width}x{height}"),
+        Event.KeyPress { key, ctrl: true, _ }         -> println("ctrl+{key}"),
+        Event.KeyPress { key, shift: true, _ }        -> println("shift+{key}"),
+        Event.KeyPress { key, _ }                     -> println("key: {key}"),
+        Event.Scroll { delta, horizontal: false }     -> println("vertical scroll {delta}"),
+        Event.Scroll { delta, horizontal: true }      -> println("horizontal scroll {delta}"),
+        Event.Quit                                     -> println("quit"),
+    }
+}
+
+// Match with rename
+act get_click_pos(ev: Event) option[(float, float)] {
+    match ev {
+        Event.Click { x: px, y: py } -> some((px, py)),
+        _                             -> none,
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 9. WHERE CLAUSE
+// ══════════════════════════════════════════════════════════════
+
+// Simple inline bounds (for short constraints)
+act largest[T: Ord](a: T, b: T) T {
+    if a.gt(b) { a } else { b }
+}
+
+// where clause for longer / multiple bounds
+act describe_and_compare[T, U](a: T, b: U) str
+where
+    T: Display + Ord,
+    U: Display + Debug,
+{
+    "{a.to_string()} vs {b.debug_str()}"
+}
+
+struct SortedContainer[T]
+where
+    T: Ord + Clone + Display,
+{
+    items: vec[T],
+}
+
+impl[T] SortedContainer[T]
+where
+    T: Ord + Clone + Display,
+{
+    act new() Self {
+        SortedContainer { items: vec[] }
+    }
+
+    act insert(mut self, item: T) void {
+        self.items.push(item)
+        self.items = self.items.sort()
+    }
+
+    act print_all(self) void {
+        loop item in self.items {
+            println(item.to_string())
+        }
+    }
+}
+
+mut sorted_ints := SortedContainer[int].new()
+sorted_ints.insert(5)
+sorted_ints.insert(2)
+sorted_ints.insert(8)
+sorted_ints.print_all()    // 2, 5, 8
+
+
+// ══════════════════════════════════════════════════════════════
+// 10. SIZED INTEGER AND FLOAT TYPES
+// ══════════════════════════════════════════════════════════════
+
+// int / uint / float — defaults (64-bit, use these 95% of the time)
+count:  int   := 1_000_000
+size:   uint  := 1024u
+ratio:  float := 0.75
+
+// Signed integers — when bit width matters
+tiny:   i8   := -100i8
+small:  i16  := -30_000i16
+medium: i32  := 2_147_483_647i32
+large:  i64  := -9_223_372_036_854_775_808i64
+
+// Unsigned integers — for bytes, network, GPU, file formats
+byte_val: u8  := 255u8
+port:     u16 := 8080u16
+flags:    u32 := 0xFF_FF_FF_FFu32
+node_id:  u64 := 9_999_999_999u64
+
+// Floats
+gpu_w:  f32 := 0.5f32      // 32-bit for GPU / tensor / ML ops
+precise: f64 := 3.14159265358979  // 64-bit (same as float)
+
+// Digit separators — _ is ignored in numeric literals
+million  := 1_000_000
+hex_mask := 0xFF_FF_FF_FFu32
+pi_str   := 3.141_592_653
+
+// Type-specific operations
+rgb: [u8; 3] := [255u8, 128u8, 0u8]
+r := rgb[0]             // u8
+g := rgb[1] as u32      // widened to u32
+b := rgb[2] as float    // widened to float
+
+// ML weight matrix uses f32
+mut weights: [[f32; 4]; 4] = [
+    [0.1f32, 0.2f32, 0.3f32, 0.4f32],
+    [0.5f32, 0.6f32, 0.7f32, 0.8f32],
+    [0.9f32, 1.0f32, 1.1f32, 1.2f32],
+    [1.3f32, 1.4f32, 1.5f32, 1.6f32],
+]
+
+
+// ══════════════════════════════════════════════════════════════
+// 11. NEVER TYPE
+// ══════════════════════════════════════════════════════════════
+
+// Functions that never return have type `never`
+act panic_with(msg: str) never {
+    println("PANIC: {msg}")
+    std.process.exit(1)
+}
+
+act unreachable_branch() never {
+    panic_with("reached unreachable code")
+}
+
+// Infinite loop also has type never when there's no break
+act server_run(port: int) never {
+    sock := net.bind(port).unwrap()
+    loop {
+        conn := sock.accept().unwrap()
+        handle_connection(conn)
+    }
+}
+
+// never coerces to any type — useful in if/match
+act safe_divide(a: int, b: int) int {
+    if b == 0 {
+        panic_with("division by zero")    // never — coerces to int
+    } else {
+        a / b
+    }
+}
+
+// In match arms — never arm satisfies exhaustiveness
+act unwrap_or_panic[T](opt: option[T]) T {
+    match opt {
+        some(val) -> val,
+        none      -> panic_with("unwrapped a none value"),
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 12. LABELED LOOPS
+// ══════════════════════════════════════════════════════════════
+
+// Break an outer loop from inside an inner loop
+'outer: loop i in 0..10 {
+    loop j in 0..10 {
+        if i * j > 50 {
+            println("stopping at i={i}, j={j}")
+            break 'outer
+        }
+    }
+}
+
+// Skip outer iteration from inner
+'rows: loop row in matrix {
+    loop cell in row {
+        if cell < 0 {
+            next 'rows    // skip this entire row
+        }
+        process(cell)
+    }
+}
+
+// Labeled infinite loop — break with value
+counter_result: int := 'counting: loop {
+    mut n: int = 0
+    loop n < 1000 {
+        n += 1
+        if n * n > 500_000 { break 'counting n }
+    }
+    break 'counting -1
+}
+
+// Search with labeled loop and break value
+grid := [
+    [0, 0, 0, 7],
+    [0, 3, 0, 0],
+    [0, 0, 0, 0],
+]
+
+target := 3
+coords: (int, int) := 'find: loop i in 0..grid.len() {
+    loop j in 0..grid[i].len() {
+        if grid[i][j] == target {
+            break 'find (i, j)
+        }
+    }
+} else {
+    (-1, -1)    // runs if we exit without break 'find
+}
+
+println("Found target at {coords}")
+
+
+// ══════════════════════════════════════════════════════════════
+// 13. ATTRIBUTES — @
+// ══════════════════════════════════════════════════════════════
+
+// Test attribute — only compiled and run during `razen test`
+@test
+act test_add() void {
+    assert add(2, 3) == 5
+    assert add(-1, 1) == 0
+}
+
+@test
+act test_parse_age() void {
+    assert parse_age("25").is_ok()
+    assert parse_age("-5").is_err()
+    assert parse_age("200").is_err()
+}
+
+// Inline hint — suggest inlining at call site
+@inline
+act fast_clamp(x: int, lo: int, hi: int) int {
+    if x < lo { ret lo }
+    if x > hi { ret hi }
+    x
+}
+
+// Derive — auto-implement common traits
+@derive[Debug, Clone, Eq, Ord, Hash]
+struct Version {
+    major: int,
+    minor: int,
+    patch: int,
+}
+
+@derive[Debug, Clone, Eq]
+struct TaggedPoint {
+    x:   float,
+    y:   float,
+    tag: str,
+}
+
+// JSON serialization hints
+@json[rename_all: "camelCase"]
+struct ApiRequest {
+    user_id:   int,
+    full_name: str,
+    is_active: bool,
+}
+
+@json[rename_all: "snake_case"]
+@json[skip_none: true]
+struct ApiResponse {
+    request_id: str,
+    user_data:  option[User],
+    error_msg:  option[str],
+}
+
+// Deprecation — emits a warning at call sites
+@deprecated["use parse_v2 instead"]
+act parse_v1(input: str) int {
+    input.parse_int().unwrap_or(0)
+}
+
+// FFI — declare external C functions
+@extern["C"]
+act c_strlen(ptr: bytes) uint
+
+@extern["C"]
+act c_malloc(size: uint) bytes
+
+@extern["C"]
+act c_free(ptr: bytes) void
+
+// No-mangle — keep symbol name for FFI exports
+@no_mangle
+pub act razen_init() void {
+    println("razen lib initialized")
+}
+
+// Conditional compilation
+@cfg[target: "linux"]
+act get_home_dir() str {
+    std.env.get("HOME").unwrap_or("/home/user")
+}
+
+@cfg[target: "windows"]
+act get_home_dir() str {
+    std.env.get("USERPROFILE").unwrap_or("C:\\Users\\user")
+}
+
+// Allow suppresses specific warnings
+@allow[unused]
+act experimental_feature() void {
+    println("not used yet")
+}
+
+// Test module — all contents compiled only during testing
+@test_module
+mod tests {
+    act test_vector_ops() void {
+        a := Vec2 { x: 1.0, y: 0.0 }
+        b := Vec2 { x: 0.0, y: 1.0 }
+        c := a + b
+        assert c.x == 1.0 && c.y == 1.0
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 14. AS — TYPE CASTING
+// ══════════════════════════════════════════════════════════════
+
+// Widening — always safe
+small_i: i32  := 100i32
+big_i:   i64  := small_i as i64
+
+small_u: u8   := 200u8
+wide_u:  u32  := small_u as u32
+
+fp32: f32 := 0.5f32
+fp64: f64 := fp32 as f64
+
+// Narrowing — truncates
+big: i64 := 300i64
+sm:  i8  := big as i8       // 44  (300 % 256)
+
+// int ↔ float
+count_i: int   := 42
+count_f: float := count_i as float   // 42.0
+
+real: float := 3.99
+trunc: int  := real as int           // 3 (truncates toward zero)
+
+// char ↔ numeric
+letter_c: char := 65u8 as char    // 'A'
+code_i:   u32  := 'Z' as u32      // 90
+
+// Safe narrowing — returns option
+big_val: i64 := 1000i64
+safe:   option[i8] := big_val.try_as[i8]()    // none — out of range
+
+small_val: i64 := 100i64
+also_safe: option[i8] := small_val.try_as[i8]()    // some(100)
+
+
+// ══════════════════════════════════════════════════════════════
+// 15. LOOP AS EXPRESSION — BREAK WITH VALUE
+// ══════════════════════════════════════════════════════════════
+
+// Find first valid candidate
+first_prime: int := loop n in 2..1000 {
+    if is_prime(n) { break n }
+} else {
+    -1    // never reached, but satisfies exhaustiveness
+}
+
+// Retry until success
+connection := loop attempt in 0..3 {
+    match try_connect("db.razen.dev", 5432) {
+        ok(conn) -> break conn,
+        err(_)   -> {
+            wait(attempt * 100)
+        },
+    }
+} else {
+    panic_with("failed to connect after 3 attempts")
+}
+
+// Accumulate until threshold
+mut total: int = 0
+batch_size: int := loop i in 0..items.len() {
+    total += items[i]
+    if total > 1000 { break i + 1 }
+} else {
+    items.len()
+}
+
+// loop else — runs when loop exits normally (without break)
+found_index: option[int] := loop i in 0..values.len() {
+    if values[i] == target { break some(i) }
+} else {
+    none
+}
+
+match found_index {
+    some(i) -> println("found at index {i}"),
+    none    -> println("not found"),
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 16. ITERATOR TRAIT — CUSTOM ITERABLE TYPES
+// ══════════════════════════════════════════════════════════════
+
+// Custom counter — implements Iterator[int]
+struct Counter {
+    current: int,
+    max:     int,
+    step:    int,
+}
+
+impl Counter {
+    act new(max: int) Counter {
+        Counter { current: 0, max: max, step: 1 }
+    }
+
+    act with_step(max: int, step: int) Counter {
+        Counter { current: 0, max: max, step: step }
+    }
+}
+
+impl Iterator[int] for Counter {
+    act next(mut self) option[int] {
+        if self.current >= self.max { ret none }
+        val := self.current
+        self.current += self.step
+        some(val)
+    }
+}
+
+// Now Counter works with loop
+mut c := Counter.new(5)
+loop n in c {
+    println(n)    // 0, 1, 2, 3, 4
+}
+
+// With step
+mut c2 := Counter.with_step(20, 3)
+loop n in c2 {
+    println(n)    // 0, 3, 6, 9, 12, 15, 18
+}
+
+// Iterator adapters all work
+squared  := Counter.new(5).map(|n| n * n).collect[vec[int]]()
+// [0, 1, 4, 9, 16]
+
+big_only := Counter.new(10).filter(|n| n > 5).collect[vec[int]]()
+// [6, 7, 8, 9]
+
+total    := Counter.new(5).sum()
+// 10  (0+1+2+3+4)
+
+// Fibonacci iterator
+struct Fibonacci {
+    a: int,
+    b: int,
+}
+
+impl Iterator[int] for Fibonacci {
+    act next(mut self) option[int] {
+        val  := self.a
+        next := self.a + self.b
+        self.a = self.b
+        self.b = next
+        some(val)    // infinite — never returns none
+    }
+}
+
+// Take first 10 fibonacci numbers
+fib_10 := Fibonacci { a: 0, b: 1 }
+    .take(10)
+    .collect[vec[int]]()
+// [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+
+// ══════════════════════════════════════════════════════════════
+// 17. PUB VISIBILITY LEVELS
+// ══════════════════════════════════════════════════════════════
+
+// pub — fully public, visible to any module
+pub struct PublicUser {
+    id:   int,
+    name: str,
+}
+
+// pub(pkg) — visible within the same package (folder tree)
+pub(pkg) struct InternalCache {
+    entries: map[str, str],
+    max_size: int,
+}
+
+// pub(mod) — visible to siblings in the same folder
+pub(mod) act validate_input(s: str) bool {
+    s.len() > 0 && s.len() < 256
+}
+
+// private (no keyword) — current file only
+struct SecretKey {
+    value: bytes,
+}
+
+act hash_password(pw: str) str {
+    // only usable in this file
+}
+
+// pub on impl methods
+impl PublicUser {
+    pub act greet(self) str {              // accessible externally
+        "Hello, {self.name}!"
+    }
+
+    pub(pkg) act internal_id(self) int {   // package-accessible
+        self.id * 1000
+    }
+
+    act secret_hash(self) str {            // private
+        hash_password(self.name)
+    }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 18. DEFAULT TRAIT IMPLEMENTATIONS
+// ══════════════════════════════════════════════════════════════
+
+trait Summary {
+    // Required — must be implemented
+    act summarize_author(self) str
+
+    // Default — provided for free, can be overridden
+    act summarize(self) str {
+        "Read more from {self.summarize_author()}..."
+    }
+
+    act print_summary(self) void {
+        println(self.summarize())
+    }
+}
+
+struct Article {
+    title:   str,
+    author:  str,
+    content: str,
+}
+
+struct Tweet {
+    username: str,
+    content:  str,
+}
+
+// Only implement the required method — gets defaults for free
+impl Summary for Article {
+    act summarize_author(self) str {
+        self.author
+    }
+
+    // Override the default summarize
+    act summarize(self) str {
+        "{self.title} — by {self.author}"
+    }
+}
+
+// Only implement required — uses default summarize and print_summary
+impl Summary for Tweet {
+    act summarize_author(self) str {
+        "@{self.username}"
+    }
+    // summarize() and print_summary() are inherited defaults
+}
+
+article := Article {
+    title:   "Razen Language Design",
+    author:  "Prathmesh",
+    content: "...",
+}
+
+tweet := Tweet { username: "razen_lang", content: "new release!" }
+
+article.print_summary()    // "Razen Language Design — by Prathmesh"
+tweet.print_summary()      // "Read more from @razen_lang..."
+
+
+// ══════════════════════════════════════════════════════════════
+// 19. NOT — LOGICAL NOT OPERATOR
+// ══════════════════════════════════════════════════════════════
+
+is_valid:    bool := true
+is_active:   bool := false
+has_items:   bool := true
+
+// Basic not
+is_invalid  := not is_valid         // false
+is_inactive := not is_active        // true
+is_empty_c  := not has_items        // false
+
+// In conditions
+if not is_valid {
+    ret err("validation failed")
+}
+
+if not user.is_active {
+    println("user is deactivated")
+}
+
+// Combining with && and ||
+if not (x > 0 && y > 0) {
+    println("at least one non-positive")
+}
+
+if x == 0 || not y.is_some() {
+    println("missing value")
+}
+
+// De Morgan equivalents
+a_val := true
+b_val := false
+
+not_both   := not (a_val && b_val)     // true   — same as: not a_val || not b_val
+not_either := not (a_val || b_val)     // false  — same as: not a_val && not b_val
+
+// In guard
+act process_user(user: option[User]) result[str, str] {
+    guard not user.is_none() else { ret err("user required") }
+    act_user := user.unwrap()
+    guard not act_user.name.is_empty() else { ret err("name required") }
+    ok("processed {act_user.name}")
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 20. STRING ESCAPE SEQUENCES
+// ══════════════════════════════════════════════════════════════
+
+// All escape sequences
+tab_sep     := "col1\tcol2\tcol3"          // horizontal tab
+newline_sep := "line 1\nline 2\nline 3"    // newline
+crlf        := "windows\r\nline ending"    // CRLF
+backslash   := "C:\\Users\\razen\\notes"   // literal \
+quoted      := "she said \"hello\""        // literal "
+single_q    := 'it\'s a char'              // literal ' in char literal
+null_byte   := "\0"                        // null terminator
+hex_A       := "\x41"                      // hex byte: 'A'
+hex_null    := "\x00"                      // hex byte: null
+smiley      := "\u{1F600}"                 // unicode: 😀
+heart       := "\u{2764}"                  // unicode: ❤
+music_note  := "\u{1F3B5}"                // unicode: 🎵
+
+// Raw strings — no escape processing
+raw_path    := r"C:\Users\razen\notes.txt"     // backslash is literal
+raw_regex   := r"\d{3}-\d{3}-\d{4}"           // regex pattern
+raw_latex   := r"\frac{a}{b} + \sqrt{c^2}"    // LaTeX
+raw_windows := r"\\server\share\file.txt"      // UNC path
+
+// Multiline with \n
+multiline_a := "first line\nsecond line\nthird line"
+
+// Multiline string literal (newline in source)
+multiline_b := "first line
+second line
+third line"
+
+// String builder for dynamic construction
+mut b := string_builder()
+b.append("Hello")
+b.append(", ")
+b.append("Razen!\n")
+b.append("\t→ version: 1.0")
+result_str := b.to_string()
+// "Hello, Razen!\n\t→ version: 1.0"

@@ -1,0 +1,11 @@
+[package]
+name = "razen_sema"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+razen_ast = { path = "../razen_ast" }
+razen_lexer = { path = "../razen_lexer" }
+
+[dev-dependencies]
+razen_parser = { path = "../razen_parser" }

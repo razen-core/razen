@@ -1,0 +1,9 @@
+[package]
+name = "razen_parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+razen_lexer = { path = "../razen_lexer" }
+razen_ast = { path = "../razen_ast" }
+winnow = "1.0"
