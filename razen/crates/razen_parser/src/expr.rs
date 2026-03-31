@@ -228,8 +228,7 @@ fn parse_postfix(s: &mut TokenStream, lhs: Expr) -> Result<PostfixResult, ParseE
             // Method call: expr.method(args)
             if s.check(&TokenKind::LParen) {
                 s.advance();
-                let args =
-                    s.parse_comma_separated(&TokenKind::RParen, |s| parse_expr(s))?;
+                let args = s.parse_comma_separated(&TokenKind::RParen, |s| parse_expr(s))?;
                 s.expect(&TokenKind::RParen)?;
                 let span = s.span_from(start);
                 Ok(PostfixResult::Consumed(Expr::MethodCall {
@@ -379,10 +378,7 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
             let raw = raw.clone();
             s.advance();
             Ok(Expr::Literal {
-                lit: Literal::Int {
-                    raw,
-                    span: start,
-                },
+                lit: Literal::Int { raw, span: start },
                 span: start,
             })
         }
@@ -392,10 +388,7 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
             let raw = raw.clone();
             s.advance();
             Ok(Expr::Literal {
-                lit: Literal::Float {
-                    raw,
-                    span: start,
-                },
+                lit: Literal::Float { raw, span: start },
                 span: start,
             })
         }
@@ -481,9 +474,7 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
                 s.advance();
                 let mut elements = vec![first];
                 if !s.check(&TokenKind::RParen) {
-                    let rest = s.parse_comma_separated(&TokenKind::RParen, |s| {
-                        parse_expr(s)
-                    })?;
+                    let rest = s.parse_comma_separated(&TokenKind::RParen, |s| parse_expr(s))?;
                     elements.extend(rest);
                 }
                 s.expect(&TokenKind::RParen)?;
@@ -505,8 +496,7 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
         // Array literal: [1, 2, 3]
         TokenKind::LBracket => {
             s.advance();
-            let elements =
-                s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
+            let elements = s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
             s.expect(&TokenKind::RBracket)?;
             let span = s.span_from(start);
             Ok(Expr::Array { elements, span })
@@ -527,14 +517,12 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
         // Return
         TokenKind::Ret => {
             s.advance();
-            let value = if !s.is_eof()
-                && !s.check(&TokenKind::RBrace)
-                && !s.check(&TokenKind::Comma)
-            {
-                Some(Box::new(parse_expr(s)?))
-            } else {
-                None
-            };
+            let value =
+                if !s.is_eof() && !s.check(&TokenKind::RBrace) && !s.check(&TokenKind::Comma) {
+                    Some(Box::new(parse_expr(s)?))
+                } else {
+                    None
+                };
             let span = s.span_from(start);
             Ok(Expr::Return { value, span })
         }
@@ -623,34 +611,31 @@ pub fn parse_primary(s: &mut TokenStream) -> Result<Expr, ParseError> {
 // Identifier / Path / Struct literal / collection literal dispatch
 // ---------------------------------------------------------------------------
 
-fn parse_ident_or_path(
-    s: &mut TokenStream,
-    name: String,
-    start: Span,
-) -> Result<Expr, ParseError> {
+fn parse_ident_or_path(s: &mut TokenStream, name: String, start: Span) -> Result<Expr, ParseError> {
     // Check for collection constructors: vec[...], map[...], set[...], tensor[...]
     match name.as_str() {
-        "vec" if s.check(&TokenKind::LBracket) => {
-            s.advance(); // consume ident
-            s.advance(); // consume [
-            let elements =
-                s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
+        // NOTE: at this point `s` is still positioned at the identifier token itself
+        // (parse_primary does not consume it before calling us).  So to peek at the
+        // token that comes *after* the identifier we must use peek_ahead(1).
+        "vec" if s.peek_ahead(1).kind == TokenKind::LBracket => {
+            s.advance(); // consume "vec" ident
+            s.advance(); // consume "["
+            let elements = s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
             s.expect(&TokenKind::RBracket)?;
             let span = s.span_from(start);
             return Ok(Expr::Vec { elements, span });
         }
-        "set" if s.check(&TokenKind::LBracket) => {
-            s.advance();
-            s.advance();
-            let elements =
-                s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
+        "set" if s.peek_ahead(1).kind == TokenKind::LBracket => {
+            s.advance(); // consume "set"
+            s.advance(); // consume "["
+            let elements = s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
             s.expect(&TokenKind::RBracket)?;
             let span = s.span_from(start);
             return Ok(Expr::Set { elements, span });
         }
-        "map" if s.check(&TokenKind::LBracket) => {
-            s.advance();
-            s.advance();
+        "map" if s.peek_ahead(1).kind == TokenKind::LBracket => {
+            s.advance(); // consume "map"
+            s.advance(); // consume "["
             let entries = s.parse_comma_separated(&TokenKind::RBracket, |s| {
                 let key = parse_expr(s)?;
                 s.expect(&TokenKind::Colon)?;
@@ -661,11 +646,10 @@ fn parse_ident_or_path(
             let span = s.span_from(start);
             return Ok(Expr::Map { entries, span });
         }
-        "tensor" if s.check(&TokenKind::LBracket) => {
-            s.advance();
-            s.advance();
-            let elements =
-                s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
+        "tensor" if s.peek_ahead(1).kind == TokenKind::LBracket => {
+            s.advance(); // consume "tensor"
+            s.advance(); // consume "["
+            let elements = s.parse_comma_separated(&TokenKind::RBracket, |s| parse_expr(s))?;
             s.expect(&TokenKind::RBracket)?;
             let span = s.span_from(start);
             return Ok(Expr::Tensor { elements, span });
@@ -689,10 +673,7 @@ fn parse_ident_or_path(
         s.restore(save);
     }
 
-    Ok(Expr::Ident {
-        ident,
-        span: start,
-    })
+    Ok(Expr::Ident { ident, span: start })
 }
 
 /// Heuristic to determine if `{` starts a struct literal vs a block.
@@ -701,9 +682,13 @@ fn is_struct_literal_start(s: &TokenStream) -> bool {
     let after_brace = &s.peek_ahead(1).kind;
     match after_brace {
         // { field_name: ... } — likely struct
+        // We require a colon after the field name to distinguish `{ a }` (a
+        // block expression) from `User { name: value }` (a struct literal).
+        // A trailing comma `{ field,` is also accepted for multi-field structs
+        // parsed with shorthand, but `{ field }` alone is NOT a struct literal.
         TokenKind::Ident(_) => {
             let after_ident = &s.peek_ahead(2).kind;
-            matches!(after_ident, TokenKind::Colon | TokenKind::Comma | TokenKind::RBrace)
+            matches!(after_ident, TokenKind::Colon | TokenKind::Comma)
         }
         // { ..source } — struct update
         TokenKind::DotDot => true,

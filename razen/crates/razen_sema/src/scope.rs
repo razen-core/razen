@@ -107,4 +107,10 @@ impl Environment {
         }
         None
     }
+
+    /// Returns the number of currently active (open) scopes.
+    /// Zero means no scope has been entered yet.
+    pub fn active_depth(&self) -> usize {
+        self.active.len()
+    }
 }

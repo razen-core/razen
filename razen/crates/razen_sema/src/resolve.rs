@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use razen_ast::expr::{Expr, ForkKind, LoopKind};
-use razen_ast::item::{FnDef, Item, StructDef, EnumDef, TraitDef, ImplBlock, TypeAliasDef, ConstDef, SharedDef};
+use razen_ast::item::{FnDef, Item};
 use razen_ast::module::Module;
 use razen_ast::pat::Pattern;
 use razen_ast::span::Span;
@@ -14,16 +14,28 @@ use razen_ast::stmt::Stmt;
 use razen_ast::types::TypeExpr;
 
 use crate::error::SemanticError;
-use crate::scope::{Environment, ScopeKind, ScopeId};
+use crate::scope::{Environment, ScopeKind};
 use crate::symbol::{DefId, SymbolKind, SymbolTable};
+use crate::ty::Ty;
 
-/// The output of Semantic Analysis: mappings and errors.
+/// The combined output of all semantic analysis phases.
+///
+/// Populated in three passes:
+///   1. **Name resolution** (`Resolver`) — fills `resolutions`, `symbol_table`, `environment`.
+///   2. **Type checking** (`TypeChecker`) — fills `type_env`, `expr_types`.
+///   3. **Mutability checking** (`MutabilityChecker`) — may add more entries to `errors`.
 #[derive(Debug)]
 pub struct SemanticModel {
     pub symbol_table: SymbolTable,
     pub environment: Environment,
     /// Maps the `Span` of an identifier usage to its resolved `DefId`.
     pub resolutions: HashMap<Span, DefId>,
+    /// Maps every binding `DefId` to its resolved `Ty`.
+    /// Filled by the type-checker; may be empty before that phase runs.
+    pub type_env: HashMap<DefId, Ty>,
+    /// Maps the `Span` of every expression to its resolved `Ty`.
+    /// Filled by the type-checker.
+    pub expr_types: HashMap<Span, Ty>,
     pub errors: Vec<SemanticError>,
 }
 
@@ -39,27 +51,56 @@ impl Resolver {
                 symbol_table: SymbolTable::new(),
                 environment: Environment::new(),
                 resolutions: HashMap::new(),
+                type_env: HashMap::new(),
+                expr_types: HashMap::new(),
                 errors: Vec::new(),
             },
         }
     }
 
-    /// Resolve an entire module, returning the semantic model.
-    pub fn resolve(mut self, module: &Module) -> SemanticModel {
-        self.model.environment.enter_scope(ScopeKind::Module);
-        
-        // Pass 1: Global declarations
-        // In Razen, order doesn't matter for top-level declarations
+    /// Resolve an entire module using a freshly created `SemanticModel`.
+    /// The prelude is NOT injected here; call `resolve_with_model` if you
+    /// need a pre-populated model (e.g. with prelude names already in scope).
+    pub fn resolve(self, module: &Module) -> SemanticModel {
+        let model = SemanticModel {
+            symbol_table: SymbolTable::new(),
+            environment: Environment::new(),
+            resolutions: HashMap::new(),
+            type_env: HashMap::new(),
+            expr_types: HashMap::new(),
+            errors: Vec::new(),
+        };
+        self.resolve_with_model(module, model)
+    }
+
+    /// Resolve a module using an existing `SemanticModel`.
+    ///
+    /// This is the preferred entry point when the prelude has already been
+    /// injected into `model.environment` and `model.type_env`.
+    pub fn resolve_with_model(mut self, module: &Module, model: SemanticModel) -> SemanticModel {
+        self.model = model;
+
+        // The caller is responsible for having entered a module-level scope
+        // (or we create one here if the environment is empty).
+        let needs_scope = self.model.environment.active_depth() == 0;
+        if needs_scope {
+            self.model.environment.enter_scope(ScopeKind::Module);
+        }
+
+        // Pass 1: Global declarations — order-independent at module level.
         for item in &module.items {
             self.declare_item(item);
         }
 
-        // Pass 2: Bodies
+        // Pass 2: Bodies — visit all items now that names are declared.
         for item in &module.items {
             self.visit_item(item);
         }
 
-        self.model.environment.exit_scope();
+        if needs_scope {
+            self.model.environment.exit_scope();
+        }
+
         self.model
     }
 
@@ -73,7 +114,10 @@ impl Resolver {
     fn declare_item(&mut self, item: &Item) {
         match item {
             Item::Function(fndef) => {
-                let id = self.model.symbol_table.add(&fndef.name, SymbolKind::Function);
+                let id = self
+                    .model
+                    .symbol_table
+                    .add(&fndef.name, SymbolKind::Function);
                 self.model.environment.define(fndef.name.name.clone(), id);
             }
             Item::Struct(sdef) => {
@@ -84,7 +128,7 @@ impl Resolver {
                 let id = self.model.symbol_table.add(&edef.name, SymbolKind::Enum);
                 self.model.environment.define(edef.name.name.clone(), id);
                 // In Razen, it's common for enum variants to be namespaced under the Enum,
-                // but some languages put them in the module scope. 
+                // but some languages put them in the module scope.
                 // Given `Use Enum { Variant }` we treat them as namespaced, so we don't bind them globally here.
             }
             Item::Trait(tdef) => {
@@ -92,7 +136,10 @@ impl Resolver {
                 self.model.environment.define(tdef.name.name.clone(), id);
             }
             Item::TypeAlias(tdef) => {
-                let id = self.model.symbol_table.add(&tdef.name, SymbolKind::TypeAlias);
+                let id = self
+                    .model
+                    .symbol_table
+                    .add(&tdef.name, SymbolKind::TypeAlias);
                 self.model.environment.define(tdef.name.name.clone(), id);
             }
             Item::Const(cdef) => {
@@ -107,7 +154,7 @@ impl Resolver {
             Item::Use(_) => {
                 // To be robust, Use handling is slightly more involved (module resolution).
             }
-            Item::Impl(_) => {} 
+            Item::Impl(_) => {}
         }
     }
 
@@ -134,7 +181,8 @@ impl Resolver {
                         for ty in fields {
                             self.visit_type(ty);
                         }
-                    } else if let razen_ast::item::EnumVariantKind::Named { fields } = &variant.kind {
+                    } else if let razen_ast::item::EnumVariantKind::Named { fields } = &variant.kind
+                    {
                         for field in fields {
                             self.visit_type(&field.ty);
                         }
@@ -204,32 +252,46 @@ impl Resolver {
 
     fn visit_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Let { pattern, ty, value, .. } => {
+            Stmt::Let {
+                pattern, ty, value, ..
+            } => {
                 self.visit_expr(value); // evaluate value before binding (no recursive self-references)
                 if let Some(t) = ty {
                     self.visit_type(t);
                 }
                 self.visit_pattern(pattern, false);
             }
-            Stmt::LetMut { name, ty, value, .. } => {
+            Stmt::LetMut {
+                name, ty, value, ..
+            } => {
                 self.visit_expr(value);
                 self.visit_type(ty);
-                let id = self.model.symbol_table.add(name, SymbolKind::Variable { is_mut: true });
+                let id = self
+                    .model
+                    .symbol_table
+                    .add(name, SymbolKind::Variable { is_mut: true });
                 self.model.environment.define(name.name.clone(), id);
+                self.model.resolutions.insert(name.span, id);
             }
-            Stmt::Const { name, ty, value, .. } => {
+            Stmt::Const {
+                name, ty, value, ..
+            } => {
                 self.visit_expr(value);
                 self.visit_type(ty);
                 let id = self.model.symbol_table.add(name, SymbolKind::Const);
                 self.model.environment.define(name.name.clone(), id);
+                self.model.resolutions.insert(name.span, id);
             }
-            Stmt::Shared { name, ty, value, .. } => {
+            Stmt::Shared {
+                name, ty, value, ..
+            } => {
                 self.visit_expr(value);
                 if let Some(t) = ty {
                     self.visit_type(t);
                 }
                 let id = self.model.symbol_table.add(name, SymbolKind::Shared);
                 self.model.environment.define(name.name.clone(), id);
+                self.model.resolutions.insert(name.span, id);
             }
             Stmt::Expr { expr, .. } => self.visit_expr(expr),
             Stmt::Return { value, .. } => {
@@ -244,7 +306,11 @@ impl Resolver {
             }
             Stmt::Next { .. } => {}
             Stmt::Defer { body, .. } => self.visit_expr(body),
-            Stmt::Guard { condition, else_body, .. } => {
+            Stmt::Guard {
+                condition,
+                else_body,
+                ..
+            } => {
                 self.visit_expr(condition);
                 // enter a block scope for the else body
                 self.model.environment.enter_scope(ScopeKind::Block);
@@ -333,7 +399,12 @@ impl Resolver {
                 }
                 self.model.environment.exit_scope();
             }
-            Expr::If { condition, then_block, else_block, .. } => {
+            Expr::If {
+                condition,
+                then_block,
+                else_block,
+                ..
+            } => {
                 self.visit_expr(condition);
                 // `then_block` is historically an Expr::Block, which opens its own scope via visit_expr
                 self.visit_expr(then_block);
@@ -341,13 +412,19 @@ impl Resolver {
                     self.visit_expr(e);
                 }
             }
-            Expr::IfLet { pattern, value, then_block, else_block, .. } => {
+            Expr::IfLet {
+                pattern,
+                value,
+                then_block,
+                else_block,
+                ..
+            } => {
                 self.visit_expr(value);
                 self.model.environment.enter_scope(ScopeKind::Block);
                 self.visit_pattern(pattern, false);
                 self.visit_expr(then_block);
                 self.model.environment.exit_scope();
-                
+
                 if let Some(e) = else_block {
                     self.visit_expr(e);
                 }
@@ -364,7 +441,12 @@ impl Resolver {
                     self.model.environment.exit_scope();
                 }
             }
-            Expr::Loop { kind, body, else_block, .. } => {
+            Expr::Loop {
+                kind,
+                body,
+                else_block,
+                ..
+            } => {
                 self.model.environment.enter_scope(ScopeKind::Loop);
                 match kind {
                     LoopKind::Infinite => {}
@@ -380,7 +462,12 @@ impl Resolver {
                     self.visit_expr(e);
                 }
             }
-            Expr::LoopLet { pattern, value, body, .. } => {
+            Expr::LoopLet {
+                pattern,
+                value,
+                body,
+                ..
+            } => {
                 self.model.environment.enter_scope(ScopeKind::Loop);
                 self.visit_expr(value);
                 self.visit_pattern(pattern, false);
@@ -393,13 +480,20 @@ impl Resolver {
                     if let Some(ty) = &param.ty {
                         self.visit_type(ty);
                     }
-                    let id = self.model.symbol_table.add(&param.name, SymbolKind::Variable { is_mut: false });
+                    let id = self
+                        .model
+                        .symbol_table
+                        .add(&param.name, SymbolKind::Variable { is_mut: false });
                     self.model.environment.define(param.name.name.clone(), id);
                 }
                 self.visit_expr(body);
                 self.model.environment.exit_scope();
             }
-            Expr::Tuple { elements, .. } | Expr::Vec { elements, .. } | Expr::Set { elements, .. } | Expr::Array { elements, .. } | Expr::Tensor { elements, .. } => {
+            Expr::Tuple { elements, .. }
+            | Expr::Vec { elements, .. }
+            | Expr::Set { elements, .. }
+            | Expr::Array { elements, .. }
+            | Expr::Tensor { elements, .. } => {
                 for el in elements {
                     self.visit_expr(el);
                 }
@@ -410,7 +504,12 @@ impl Resolver {
                     self.visit_expr(v);
                 }
             }
-            Expr::StructLiteral { name, fields, spread, .. } => {
+            Expr::StructLiteral {
+                name,
+                fields,
+                spread,
+                ..
+            } => {
                 self.visit_expr(name);
                 for f in fields {
                     self.visit_expr(&f.value);
@@ -423,7 +522,10 @@ impl Resolver {
                 self.visit_expr(expr);
                 self.visit_type(ty);
             }
-            Expr::Try { expr, .. } | Expr::Await { expr, .. } | Expr::Paren { inner: expr, .. } | Expr::Unsafe { body: expr, .. } => {
+            Expr::Try { expr, .. }
+            | Expr::Await { expr, .. }
+            | Expr::Paren { inner: expr, .. }
+            | Expr::Unsafe { body: expr, .. } => {
                 self.visit_expr(expr);
             }
             Expr::Assign { target, value, .. } => {
@@ -443,12 +545,19 @@ impl Resolver {
                             self.visit_expr(&t.expr);
                             // Then bind its output name in the fork scope
                             if let Some(ident) = &t.binding {
-                                let id = self.model.symbol_table.add(ident, SymbolKind::Variable { is_mut: false });
+                                let id = self
+                                    .model
+                                    .symbol_table
+                                    .add(ident, SymbolKind::Variable { is_mut: false });
                                 self.model.environment.define(ident.name.clone(), id);
                             }
                         }
                     }
-                    ForkKind::Loop { binding, iterable, body } => {
+                    ForkKind::Loop {
+                        binding,
+                        iterable,
+                        body,
+                    } => {
                         self.visit_expr(iterable);
                         self.visit_pattern(binding, false);
                         self.visit_expr(body);
@@ -470,15 +579,19 @@ impl Resolver {
                 }
             }
             // Leaves
-            Expr::Literal { .. } | Expr::Break { .. } | Expr::Next { .. } | Expr::Return { .. } | Expr::Placeholder { .. } => {}
+            Expr::Literal { .. }
+            | Expr::Break { .. }
+            | Expr::Next { .. }
+            | Expr::Return { .. }
+            | Expr::Placeholder { .. } => {}
         }
     }
 
     fn visit_type(&mut self, ty: &TypeExpr) {
         match ty {
             TypeExpr::Named { name, span } => {
-                // Primitive types like `int`, `float`, `str` will not be in Environment yet, 
-                // unless we pre-populate the environment. For now, if we don't find them, we don't error 
+                // Primitive types like `int`, `float`, `str` will not be in Environment yet,
+                // unless we pre-populate the environment. For now, if we don't find them, we don't error
                 // if they are standard primitives, but a clean way is to pre-populate.
                 // For now, attempt resolution.
                 if let Some(def_id) = self.model.environment.resolve(&name.name) {
@@ -509,15 +622,24 @@ impl Resolver {
                 self.visit_type(ret);
             }
             TypeExpr::Ref { inner, .. } => self.visit_type(inner),
-            TypeExpr::Inferred { .. } | TypeExpr::Void { .. } | TypeExpr::Never { .. } | TypeExpr::SelfType { .. } => {}
+            TypeExpr::Inferred { .. }
+            | TypeExpr::Void { .. }
+            | TypeExpr::Never { .. }
+            | TypeExpr::SelfType { .. } => {}
         }
     }
 
     fn visit_pattern(&mut self, pat: &Pattern, is_mut: bool) {
         match pat {
-            Pattern::Binding { name, .. } => {
-                let id = self.model.symbol_table.add(name, SymbolKind::Variable { is_mut });
+            Pattern::Binding { name, span } => {
+                let id = self
+                    .model
+                    .symbol_table
+                    .add(name, SymbolKind::Variable { is_mut });
                 self.model.environment.define(name.name.clone(), id);
+                // Also record the definition span so the type-checker can
+                // look up the DefId from a pattern-binding span.
+                self.model.resolutions.insert(*span, id);
             }
             Pattern::Tuple { elements, .. } => {
                 for e in elements {
@@ -526,15 +648,21 @@ impl Resolver {
             }
             Pattern::Struct { fields, .. } => {
                 for field in fields {
-                    // If rename is provided, bind the rename. Else bind the field name. 
+                    // If rename is provided, bind the rename. Else bind the field name.
                     // OR if there's a sub-pattern, bind that.
                     if let Some(p) = &field.pattern {
                         self.visit_pattern(p, is_mut);
                     } else if let Some(rename) = &field.rename {
-                        let id = self.model.symbol_table.add(rename, SymbolKind::Variable { is_mut });
+                        let id = self
+                            .model
+                            .symbol_table
+                            .add(rename, SymbolKind::Variable { is_mut });
                         self.model.environment.define(rename.name.clone(), id);
                     } else {
-                        let id = self.model.symbol_table.add(&field.name, SymbolKind::Variable { is_mut });
+                        let id = self
+                            .model
+                            .symbol_table
+                            .add(&field.name, SymbolKind::Variable { is_mut });
                         self.model.environment.define(field.name.name.clone(), id);
                     }
                 }
@@ -554,15 +682,23 @@ impl Resolver {
                     if let Some(p) = &f.pattern {
                         self.visit_pattern(p, is_mut);
                     } else if let Some(rename) = &f.rename {
-                        let id = self.model.symbol_table.add(rename, SymbolKind::Variable { is_mut });
+                        let id = self
+                            .model
+                            .symbol_table
+                            .add(rename, SymbolKind::Variable { is_mut });
                         self.model.environment.define(rename.name.clone(), id);
                     } else {
-                        let id = self.model.symbol_table.add(&f.name, SymbolKind::Variable { is_mut });
+                        let id = self
+                            .model
+                            .symbol_table
+                            .add(&f.name, SymbolKind::Variable { is_mut });
                         self.model.environment.define(f.name.name.clone(), id);
                     }
                 }
             }
-            Pattern::Some { inner, .. } | Pattern::Ok { inner, .. } | Pattern::Err { inner, .. } => {
+            Pattern::Some { inner, .. }
+            | Pattern::Ok { inner, .. }
+            | Pattern::Err { inner, .. } => {
                 self.visit_pattern(inner, is_mut);
             }
             Pattern::Or { patterns, .. } => {
@@ -570,7 +706,11 @@ impl Resolver {
                     self.visit_pattern(p, is_mut);
                 }
             }
-            Pattern::Wildcard { .. } | Pattern::Literal { .. } | Pattern::None { .. } | Pattern::EnumUnit { .. } | Pattern::Range { .. } => {}
+            Pattern::Wildcard { .. }
+            | Pattern::Literal { .. }
+            | Pattern::None { .. }
+            | Pattern::EnumUnit { .. }
+            | Pattern::Range { .. } => {}
         }
     }
 }
